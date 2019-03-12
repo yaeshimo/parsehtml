@@ -1,0 +1,10 @@
+[
+	{
+		"type": "element",
+		"data": "a",
+		"attr": {
+			"class": "preview",
+			"href": "./test.html"
+		}
+	}
+]
