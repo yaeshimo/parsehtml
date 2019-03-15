@@ -35,22 +35,23 @@ func TestFilter(t *testing.T) {
 		}
 	)
 	for _, fi = range dfis {
+		t.Logf("Test: %q", fi.Name())
 		exp, err := ioutil.ReadFile(join(expJSON))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		ns := NewHTMLNodes()
-		if err := ns.Filter.ReadConfig(join(config)); err != nil {
+		fil := NewFilter()
+		if err := fil.ReadConfig(join(config)); err != nil {
 			t.Fatal(err)
 		}
 
 		// stored target nodes in ns.nodes
-		if err := ns.ParseFile(join(fileHTML)); err != nil {
+		if err := fil.ParseFile(join(fileHTML)); err != nil {
 			t.Fatal(err)
 		}
 
-		b, err := ns.MarshalIndent()
+		b, err := fil.Nodes().MarshalIndent()
 		if err != nil {
 			t.Fatal(err)
 		}

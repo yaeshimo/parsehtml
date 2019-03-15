@@ -1,0 +1,9 @@
+[
+	{
+		"type": "element",
+		"data": "a",
+		"attr": {
+			"href": "http://example.com"
+		}
+	}
+]

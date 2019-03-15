@@ -1,276 +1,174 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
-	"regexp"
-
-	"golang.org/x/net/html"
+	"strings"
 )
 
-// TODO:
-// 1. make test?
-// 2. impl flags for more useful
-// 3. split to other source files?
+const Name = "parsehtml"
+const Version = "0.0.1"
 
-// provide convert functions?
-var nodeTypeToString = map[html.NodeType]string{
-	html.ErrorNode:    "error",
-	html.TextNode:     "text",
-	html.DocumentNode: "document",
-	html.ElementNode:  "element",
-	html.CommentNode:  "comment",
-	html.DoctypeNode:  "doctype",
-}
-var stringToNodeType = map[string]html.NodeType{
-	"error":    html.ErrorNode,
-	"text":     html.TextNode,
-	"document": html.DocumentNode,
-	"element":  html.ElementNode,
-	"comment":  html.CommentNode,
-	"doctype":  html.DoctypeNode,
-}
+// remove?
+// change by ldflags?
+var (
+	// git rev-parse --verify --short HEAD
+	Commit = ""
+	// date -u +%Y-%m-%d
+	Date = ""
+)
 
-// regular expression 2
-type RE2 struct {
-	// pattern
-	PatData *string            `json:"pat_data"`
-	PatAttr map[string]*string `json:"pat_attr"`
-
-	// store compiled regexp
-	matchData *regexp.Regexp
-	matchAttr map[string]*regexp.Regexp
-}
-
-func NewRE2() *RE2 {
-	return &RE2{matchAttr: make(map[string]*regexp.Regexp)}
-}
-
-func (p *RE2) Compile() error {
-	var err error
-	if p.PatData != nil {
-		p.matchData, err = regexp.Compile(*p.PatData)
-		if err != nil {
-			return err
+func printVersion() error {
+	info := Name + " " + Version
+	if Commit != "" {
+		info += " (" + Commit
+		if Date != "" {
+			info += " " + Date
 		}
+		info += ")"
 	}
-	p.matchAttr = make(map[string]*regexp.Regexp)
-	for key, pat := range p.PatAttr {
-		if pat == nil {
-			p.matchAttr[key] = nil
-			continue
-		}
-		r, err := regexp.Compile(*pat)
-		if err != nil {
-			return err
-		}
-		p.matchAttr[key] = r
-	}
-	return nil
+	_, err := fmt.Println(info)
+	return err
 }
 
-func (p *RE2) MatchData(s string) bool {
-	if p.matchData == nil {
-		return true
+// example and comment for print usage
+type Examples []struct {
+	c string
+	e string
+}
+
+func (es *Examples) Sprint() string {
+	var s string
+	for _, e := range *es {
+		s += fmt.Sprintf("  %s\n", e.c)
+		s += fmt.Sprintf("  $ %s\n\n", e.e)
 	}
-	return p.matchData.MatchString(s)
+	return s
 }
 
-func (p *RE2) MatchAttr(attrs []html.Attribute) bool {
-	nmap := len(p.PatAttr)
-	if nmap != 0 {
-		for _, attr := range attrs {
-			match, ok := p.matchAttr[attr.Key]
-			if ok && (match == nil || match.MatchString(attr.Val)) {
-				nmap--
-			}
-		}
+var examples = &Examples{
+	{
+		c: "Display help message",
+		e: Name + " -help",
+	},
+	{
+		c: "Output json format html nodes to stdout",
+		e: Name + " -html /path/file.html",
+	},
+	{
+		c: "Filter by json",
+		e: Name + ` -html file.html -json '{"type":"element"}'`,
+	},
+	{
+		c: "The null means all match",
+		e: Name + ` -html file.html -json '{"attr":{"href":null}}'`,
+	},
+	{
+		c: "Output config template to stdout",
+		e: Name + " -template",
+	},
+}
+
+func makeUsage(w *io.Writer) func() {
+	return func() {
+		flag.CommandLine.SetOutput(*w)
+		// two spaces
+		fmt.Fprintf(*w, "Description:\n")
+		fmt.Fprintf(*w, "  Output json format html nodes\n\n")
+		fmt.Fprintf(*w, "Usage:\n")
+		fmt.Fprintf(*w, "  %s [Options]\n", Name)
+		fmt.Fprintf(*w, "  %s /path/file.html\n", Name)
+		fmt.Fprintf(*w, "  %s /path/file.html [JSON]\n", Name)
+		fmt.Fprintf(*w, "\n")
+		fmt.Fprintf(*w, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(*w, "\n")
+		fmt.Fprintf(*w, "Examples:\n%s", examples.Sprint())
 	}
-	return nmap == 0
 }
 
-// filter for html.Node
-// if value is nil then *Filter.IsWant return true
-type Filter struct {
-	// filter by html.NodeType
-	Type *string `json:"type"`
-
-	// filter by html.Data
-	Data *string `json:"data"`
-
-	// filter by html.Attribute
-	Attr map[string]*string `json:"attr"`
-
-	// regexp filter
-	// use RE2 for attribute valus and node data
-	RE2 *RE2 `json:"re2"`
-}
-
-func NewFilter() *Filter {
-	return &Filter{
-		Attr: make(map[string]*string),
-		RE2:  NewRE2(),
-	}
-}
-
-func (fil *Filter) readConfig(file string) error {
-	b, err := ioutil.ReadFile(file)
+func template(w io.Writer) error {
+	fil := NewFilter()
+	b, err := fil.MarshalIndent()
 	if err != nil {
-		return err
+		return nil
 	}
-	return json.Unmarshal(b, &fil)
+	_, err = fmt.Fprintf(w, "%s\n", string(b))
+	return err
 }
 
-func (fil *Filter) ReadConfig(file string) error {
-	if err := fil.readConfig(file); err != nil {
-		return err
-	}
-	return fil.RE2.Compile()
+var opt struct {
+	help     bool
+	version  bool
+	template bool
+	config   string
+	html     string
+	json     string
 }
 
-// TODO: rename?
-func (fil *Filter) IsWant(n *html.Node) bool {
-	if n == nil {
-		return false
-	}
-
-	// TODO: to method?
-	if fil.Type != nil {
-		expType, ok := stringToNodeType[*fil.Type]
-		if !ok {
-			return false
-		}
-		if n.Type != expType {
-			return false
-		}
-	}
-
-	// TODO: to method?
-	if fil.Data != nil {
-		if *fil.Data != n.Data {
-			return false
-		}
-	}
-
-	// TODO: to method?
-	// needs all matched
-	if nmap := len(fil.Attr); nmap != 0 {
-		for _, attr := range n.Attr {
-			val, ok := fil.Attr[attr.Key]
-			if ok && (val == nil || *val == attr.Val) {
-				nmap--
-			}
-		}
-		if nmap != 0 {
-			return false
-		}
-	}
-
-	// RE2
-	// need compile before use
-	if !fil.RE2.MatchData(n.Data) {
-		return false
-	}
-	if !fil.RE2.MatchAttr(n.Attr) {
-		return false
-	}
-
-	//return fil.RE2.MatchAttr(n.Attr) && fil.RE2.MatchData(n.Data)
-
-	return true
-}
-
-type HTMLNode struct {
-	Type string            `json:"type"`
-	Data string            `json:"data"`
-	Attr map[string]string `json:"attr"`
-}
-type HTMLNodes struct {
-	Filter *Filter
-
-	// store parsed nodes
-	nodes []*HTMLNode
-}
-
-func NewHTMLNodes() *HTMLNodes {
-	return &HTMLNodes{Filter: NewFilter()}
-}
-
-func (p *HTMLNodes) MarshalIndent() ([]byte, error) {
-	return json.MarshalIndent(p.nodes, "", "\t")
-}
-
-func (p *HTMLNodes) Add(n *html.Node) {
-	if n == nil {
-		return
-	}
-	ts, ok := nodeTypeToString[n.Type]
-	if !ok {
-		// TODO: handle?
-		panic("fail *HTMLNodes.Add: can not convert html.NodeType to string")
-	}
-	nn := &HTMLNode{
-		Type: ts,
-		Data: n.Data,
-		Attr: make(map[string]string),
-	}
-	for _, attr := range n.Attr {
-		nn.Attr[attr.Key] = attr.Val
-	}
-	p.nodes = append(p.nodes, nn)
-}
-
-// parse html
-func (p *HTMLNodes) ParseFile(file string) error {
-	b, err := ioutil.ReadFile(file)
-	if err != nil {
-		return err
-	}
-
-	n, err := html.Parse(bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-		if n == nil {
-			return
-		}
-		if p.Filter.IsWant(n) {
-			p.Add(n)
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f(c)
-		}
-	}
-	f(n)
-
-	return nil
+func init() {
+	flag.BoolVar(&opt.help, "help", false, "Display help message")
+	flag.BoolVar(&opt.version, "version", false, "Print version")
+	flag.BoolVar(&opt.template, "template", false, "Output config template to stdout")
+	flag.StringVar(&opt.html, "html", "", "Specify target html file")
+	flag.StringVar(&opt.config, "config", "", "Specify JSON format config file for filter")
+	flag.StringVar(&opt.json, "json", "", "Set filter")
 }
 
 func run() error {
-	file := "testdata/ex/test.html"
-	config := "testdata/ex/config.json"
+	var usageWriter io.Writer = os.Stderr
+	flag.Usage = makeUsage(&usageWriter)
+	flag.Parse()
 
-	ns := NewHTMLNodes()
-	if err := ns.Filter.ReadConfig(config); err != nil {
-		return err
+	if n := flag.NArg(); n != 0 {
+		if opt.html == "" {
+			opt.html = flag.Arg(0)
+			if opt.json == "" {
+				opt.json = strings.Join(flag.Args()[1:], "")
+			}
+		} else if opt.json == "" {
+			opt.json = strings.Join(flag.Args(), "")
+		} else {
+			flag.Usage()
+			return fmt.Errorf("invalid arguments: %q\n", flag.Args())
+		}
 	}
 
-	if err := ns.ParseFile(file); err != nil {
-		return err
+	switch {
+	case opt.help:
+		usageWriter = os.Stdout
+		flag.Usage()
+		return nil
+	case opt.version:
+		return printVersion()
+	case opt.template:
+		return template(os.Stdout)
 	}
 
-	b, err := ns.MarshalIndent()
+	fil := NewFilter()
+	if opt.config != "" {
+		if err := fil.ReadConfig(opt.config); err != nil {
+			return err
+		}
+	}
+	if opt.json != "" {
+		if err := fil.Unmarshal([]byte(opt.json)); err != nil {
+			return err
+		}
+	}
+
+	if err := fil.ParseFile(opt.html); err != nil {
+		return err
+	}
+	b, err := fil.Nodes().MarshalIndent()
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s\n", b)
-	return nil
+
+	_, err = fmt.Printf("%s\n", string(b))
+	return err
 }
 
 func main() {
