@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 )
 
 const Name = "parsehtml"
 const Version = "0.0.1"
 
-// remove?
-// change by ldflags?
+// TODO: remove?
+// change with ldflags?
 var (
 	// git rev-parse --verify --short HEAD
 	Commit = ""
@@ -20,6 +19,7 @@ var (
 	Date = ""
 )
 
+// TODO: remove?
 func printVersion() error {
 	info := Name + " " + Version
 	if Commit != "" {
@@ -48,6 +48,7 @@ func (es *Examples) Sprint() string {
 	return s
 }
 
+// append flag -example and hide from -help?
 var examples = &Examples{
 	{
 		c: "Display help message",
@@ -58,7 +59,11 @@ var examples = &Examples{
 		e: Name + " -html /path/file.html",
 	},
 	{
-		c: "Filter by json",
+		c: `Specify filter, same -json '{"attr":{"href":null}}'`,
+		e: Name + " /path/file.html attr.href",
+	},
+	{
+		c: "Filter with json",
 		e: Name + ` -html file.html -json '{"type":"element"}'`,
 	},
 	{
@@ -68,6 +73,10 @@ var examples = &Examples{
 	{
 		c: "Output config template to stdout",
 		e: Name + " -template",
+	},
+	{
+		c: "Value filter with RE2",
+		e: Name + ` /path/file.html 're2.attr.href=^https?://[\S]+$'`,
 	},
 }
 
@@ -79,8 +88,8 @@ func makeUsage(w *io.Writer) func() {
 		fmt.Fprintf(*w, "  Output json format html nodes\n\n")
 		fmt.Fprintf(*w, "Usage:\n")
 		fmt.Fprintf(*w, "  %s [Options]\n", Name)
-		fmt.Fprintf(*w, "  %s /path/file.html\n", Name)
-		fmt.Fprintf(*w, "  %s /path/file.html [JSON]\n", Name)
+		fmt.Fprintf(*w, "  %s [Options] File\n", Name)
+		fmt.Fprintf(*w, "  %s [Options] File Filter...\n", Name)
 		fmt.Fprintf(*w, "\n")
 		fmt.Fprintf(*w, "Options:\n")
 		flag.PrintDefaults()
@@ -111,7 +120,7 @@ var opt struct {
 func init() {
 	flag.BoolVar(&opt.help, "help", false, "Display help message")
 	flag.BoolVar(&opt.version, "version", false, "Print version")
-	flag.BoolVar(&opt.template, "template", false, "Output config template to stdout")
+	flag.BoolVar(&opt.template, "template", false, "Output the filter template to stdout")
 	flag.StringVar(&opt.html, "html", "", "Specify target html file")
 	flag.StringVar(&opt.config, "config", "", "Specify JSON format config file for filter")
 	flag.StringVar(&opt.json, "json", "", "Set filter")
@@ -122,17 +131,13 @@ func run() error {
 	flag.Usage = makeUsage(&usageWriter)
 	flag.Parse()
 
+	var filterArgs []string
 	if n := flag.NArg(); n != 0 {
 		if opt.html == "" {
 			opt.html = flag.Arg(0)
-			if opt.json == "" {
-				opt.json = strings.Join(flag.Args()[1:], "")
-			}
-		} else if opt.json == "" {
-			opt.json = strings.Join(flag.Args(), "")
+			filterArgs = flag.Args()[1:]
 		} else {
-			flag.Usage()
-			return fmt.Errorf("invalid arguments: %q\n", flag.Args())
+			filterArgs = flag.Args()
 		}
 	}
 
@@ -158,6 +163,11 @@ func run() error {
 			return err
 		}
 	}
+	if len(filterArgs) != 0 {
+		if err := fil.ParseArgs(filterArgs); err != nil {
+			return err
+		}
+	}
 
 	if err := fil.ParseFile(opt.html); err != nil {
 		return err
@@ -174,6 +184,6 @@ func run() error {
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		os.Exit(1)
 	}
 }

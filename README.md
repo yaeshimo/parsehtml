@@ -19,8 +19,17 @@ parsehtml /path/file.html
 Specify filter
 
 ```sh
+# only type element
+parsehtml /path/file.html 'type=element'
+parsehtml -html /path/file.html -json '{"type":"element"}'
+
+# match value
+parsehtml /path/file.html 'attr.class=preview'
+parsehtml -html /path/file.html -json '{"attr":{"class":"preview"}}'
+
 # the null means all match
-parsehtml -json '{"attr":{"href":null}}' /path/file.html
+parsehtml /path/file.html 'data.=a' 'attr.href'
+parsehtml -html /path/file.html -json '{"data":"a","attr":{"href":null}}'
 ```
 
 Use config
@@ -33,13 +42,21 @@ parsehtml -template > config.json
 $EDITOR config.json
 
 # use
-parsehtml -config config.json -html /path/file.html
+parsehtml -config /pash/config.json -html /path/file.html
 ```
 
 Regular expression 2
 
 ```sh
-parsehtml /path/file.html '{"re2":{"attr":{"href":"^https?://[\\S]+$"}}}'
+parsehtml /path/file.html 're2.attr.href=^https?://[\S]+$'
+parsehtml -html /path/file.html -json '{"re2":{"attr":{"href":"^https?://[\\S]+$"}}}'
+```
+
+If you have `jq`
+
+```sh
+# pick one
+parsehtml /path/file.html | jq '.[0]'
 ```
 
 ## Installation

@@ -10,8 +10,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// provide convert functions?
-// or use regexp?
+// provide convert functions or use regexp?
 var nodeTypeToString = map[html.NodeType]string{
 	html.ErrorNode:    "error",
 	html.TextNode:     "text",
@@ -64,7 +63,6 @@ func (p *HTMLNodes) Add(n *html.Node) {
 }
 
 // TODO: RE2 join to Filter?
-
 // regular expression 2
 type RE2 struct {
 	// pattern
@@ -83,7 +81,7 @@ func NewRE2() *RE2 {
 	}
 }
 
-// need compile before use *RE2.Match[\S]*
+// need compile before use RE2.Match*
 func (re2 *RE2) Compile() error {
 	var err error
 	if re2.Data != nil {
@@ -132,16 +130,16 @@ func (re2 *RE2) MatchAttr(attrs []html.Attribute) bool {
 // filter for html.Node
 // if value is nil then *Filter.IsWant return true
 type Filter struct {
-	// filter by html.NodeType
+	// filter for html.NodeType
 	Type *string `json:"type"`
 
-	// filter by html.Data
+	// filter for html.Data
 	Data *string `json:"data"`
 
-	// filter by html.Attribute
+	// filter for html.Attribute
 	Attr map[string]*string `json:"attr"`
 
-	// regexp filter for attribute valu and node data
+	// regexp filter for data and attribute
 	RE2 *RE2 `json:"re2"`
 
 	// store filtered nodes
@@ -170,6 +168,119 @@ func (fil *Filter) ReadConfig(file string) error {
 		return err
 	}
 	return fil.Unmarshal(b)
+}
+
+// TODO: fix to simple
+// set filter by filter args
+// eg. []string{`type=element` `attr.class`}
+// type=element is same as {"type":"element"}
+// attr.class is same as {"attr":{"class":null}}
+func (fil *Filter) ParseArgs(args []string) error {
+	splitLine := func(line string) []string {
+		var args []string
+		var (
+			r       rune
+			rs      []rune
+			literal bool // is need?
+			nline   = len(line)
+		)
+	loop:
+		for i := 0; i < nline; i++ {
+			r = rune(line[i])
+			// escape
+			if r == '\\' {
+				i++
+				if i > nline {
+					// treat last one?
+					//rs = append(rs, r)
+					break loop
+				}
+				rs = append(rs, rune(line[i]))
+				continue
+			}
+
+			// in literal
+			if literal {
+				if r == '"' {
+					literal = false
+					continue
+				}
+				rs = append(rs, r)
+				continue
+			}
+
+			switch r {
+			case '.':
+				// split
+				args = append(args, string(rs))
+				rs = []rune{}
+				continue
+			case '"':
+				// to literal
+				literal = true
+				continue
+			case '=':
+				// for value append all runes
+				args = append(args, string(rs), line[i+1:])
+				rs = []rune{} // not graceful
+				break loop
+			}
+			rs = append(rs, r)
+		}
+		if len(rs) != 0 {
+			args = append(args, string(rs))
+		}
+		return args
+	}
+
+	for _, arg := range args {
+		filters := splitLine(arg)
+		nf := len(filters)
+		if nf < 1 {
+			continue
+		}
+		switch filters[0] {
+		case "type":
+			if nf == 2 {
+				fil.Type = &filters[1]
+				continue
+			}
+		case "data":
+			if nf == 2 {
+				fil.Data = &filters[1]
+				continue
+			}
+		case "attr":
+			if nf == 2 {
+				fil.Attr[filters[1]] = nil
+				continue
+			} else if nf == 3 {
+				fil.Attr[filters[1]] = &filters[2]
+				continue
+			}
+		case "re2":
+			if nf > 2 {
+				switch filters[1] {
+				case "data":
+					if nf == 3 {
+						fil.RE2.Data = &filters[2]
+						continue
+					}
+				case "attr":
+					if nf == 3 {
+						fil.RE2.Attr[filters[2]] = nil
+						continue
+					} else if nf == 4 {
+						fil.RE2.Attr[filters[2]] = &filters[3]
+						continue
+					}
+				}
+			}
+		}
+		return errors.New("filter parse error: " + arg)
+	}
+
+	return fil.RE2.Compile()
 }
 
 func (fil *Filter) MarshalIndent() ([]byte, error) {
