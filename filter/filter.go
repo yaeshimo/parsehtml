@@ -1,4 +1,4 @@
-package main
+package filter
 
 import (
 	"bytes"
@@ -364,7 +364,7 @@ func (fil *Filter) ParseFile(file string) error {
 	return nil
 }
 
-// provide?
+// provide filtered *HTMLNodes
 func (fil *Filter) Nodes() *HTMLNodes {
 	return fil.nodes
 }

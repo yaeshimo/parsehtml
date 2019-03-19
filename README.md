@@ -61,7 +61,9 @@ parsehtml /path/file.html | jq '.[0]'
 
 ## Installation
 
-go get
+```sh
+go get github.com/yaeshimo/parsehtml/cmd/parsehtml
+```
 
 ## License
 

@@ -1,9 +1,0 @@
-{
-  "type": "element",
-  "data": "a",
-  "re2": {
-    "attr": {
-      "href": "^http://[\\S]+$"
-    }
-  }
-}
